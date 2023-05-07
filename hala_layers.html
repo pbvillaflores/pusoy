@@ -1,0 +1,571 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset='utf-8' />
+    <title>Monash Microgrid</title>
+    
+    <script src='https://api.tiles.mapbox.com/mapbox-gl-js/v1.2.1/mapbox-gl.js'></script>
+    <link href='https://api.tiles.mapbox.com/mapbox-gl-js/v1.2.1/mapbox-gl.css' rel='stylesheet' />
+    <style>
+        body { margin:0; padding:0; }
+        #map { position:absolute; top:0; bottom:0; width:100%; }
+        .mapboxgl-popup {
+  max-width: 400px;
+  font: 12px/20px 'Helvetica Neue', Arial, Helvetica, sans-serif;
+}
+
+    </style>
+</head>
+<body>
+    <style>
+      .distance-container {
+          position: absolute;
+          top: 10px;
+          left: 10px;
+          z-index: 1;
+      }
+       
+      .distance-container > * {
+          background-color: rgba(0, 0, 0, 0.5);
+          color: #fff;
+          font-size: 11px;
+          line-height: 18px;
+          display: block;
+          margin: 0;
+          padding: 5px 10px;
+          border-radius: 3px;
+      }
+
+      #MeasureOn {
+          background: white;
+          color: black;
+          position: absolute;
+          z-index: 1;
+          top: 120px;
+          right: 9px;
+          border-radius: 3px;
+          width: 30px;
+          height: 30px;
+          border: 1px solid rgba(0,0,0,0.4);
+          font-family: 'Open Sans', sans-serif;
+      }
+
+      #imagemap {
+          background: #fff;
+          position: absolute;
+          z-index: 1;
+          bottom:20px;
+          right: 9px;
+          border-radius: 3px;
+          width: 120px;
+          border: 1px solid rgba(0,0,0,0.4);
+          font-family: 'Open Sans', sans-serif;
+      }
+
+      #menu {
+          background: #fff;
+          position: absolute;
+          z-index: 1;
+          top: 10px;
+          right: 50px;
+          border-radius: 3px;
+          width: 150px;
+          border: 1px solid rgba(0,0,0,0.4);
+          font-family: 'Open Sans', sans-serif;
+      }
+
+      #menu a {
+          font-size: 13px;
+          color: #404040;
+          display: block;
+          margin: 0;
+          padding: 0;
+          padding: 10px;
+          text-decoration: none;
+          border-bottom: 1px solid rgba(0,0,0,0.25);
+          text-align: center;
+      }
+
+      #menu a:last-child {
+          border: none;
+      }
+
+      #menu .consump {
+          background-color: #f08104;
+      }
+
+      #menu a.active {
+          color: black;
+      }
+      
+      #menu a.mnuBuildings {
+          background-color: #6372e9;
+      }
+      #menu a.mnuPVsandBatteries {
+          background-color: grey;
+      }
+      #menu a.mnuHVSwitch {
+          background-color: #842424;
+      }
+      #menu a.mnuRing3 {
+          background-color: #a42d2d;
+      }
+      #menu a.mnuSubstations {
+          background-color: #c82d2d;
+      }
+
+      #menu a.active:hover {
+          background: #d8d3d9;
+      }
+      #menu a:hover {
+          background-color: white;
+          color: #404040;
+      }
+      
+      .mapboxgl-popup {
+          max-width: 400px;
+          font: 12px/20px 'Helvetica Neue', Arial, Helvetica, sans-serif;
+      }
+</style>
+
+
+<nav id="navMeasureOn">
+  <a href="#" class="active" id="MeasureOn"> <center>📏</center> </a>
+</nav>
+<nav id="menu"></nav>
+<div id='map'></div>
+<div id='imagemap'></div>
+<div id='distance' class='distance-container'></div>
+
+<div id="01" bottom="10" right="10"> <img src="https://imgur.com/a/KSvRTlN" height="40"> </div>
+
+<script src='https://api.mapbox.com/mapbox.js/plugins/turf/v2.0.2/turf.min.js'></script>
+
+<script>
+
+  mapboxgl.accessToken = 'pk.eyJ1IjoiaGFsYW1raCIsImEiOiJjanpycXQxenUwdmtoM29wZmdkNmdvaWtxIn0.7LdO2VX76KK9vr8YN_s5zg';
+  if (!mapboxgl.supported()) 
+  {
+      alert('Your browser does not support Mapbox GL');
+  } 
+  else 
+  {
+        //Import the base map (start)
+        var MeasureOn = false;
+        var saveBearing = 0; 
+        var savePitch = 0;
+        var visibilityBuilding;
+        var visibilityPV;
+        
+        var map = new mapboxgl.Map
+        ({
+            container: 'map',
+            style: 'mapbox://styles/halamkh/cjztb0a2q0s3h1cnsbb65ucii',
+            center: [145.134426, -37.912699],
+            zoom: 16,
+            maxZoom: 17, // set maxZoom
+            minZoom: 14, // set minZoom
+            antialias: true,
+            pitch:45,
+            bearing: -17.6
+            // minzoom and max
+        });
+        var geojson = {
+            "type": "FeatureCollection",
+            "features": []
+        };
+
+        // Used to draw a line between points
+        var linestring = {
+            "type": "Feature",
+            "geometry": {
+                "type": "LineString",
+                "coordinates": []
+            }
+        };
+        var distanceContainer = document.getElementById('distance');
+
+        //Import the base map (Finish)
+
+        //Insert Buildings layer (start)
+        map.on('load', function() 
+        {
+
+
+          map.addSource('geojson', {
+              "type": "geojson",
+              "data": geojson
+          });
+
+          // Add styles to the map
+          map.addLayer({
+              id: 'measure-points',
+              type: 'circle',
+              source: 'geojson',
+              paint: {
+                  'circle-radius': 5,
+                  'circle-color': '#000'
+              },
+              filter: ['in', '$type', 'Point']
+          });
+          map.addLayer({
+              id: 'measure-lines',
+              type: 'line',
+              source: 'geojson',
+              layout: {
+                  'line-cap': 'round',
+                  'line-join': 'round'
+              },
+              paint: {
+                  'line-color': '#000',
+                  'line-width': 2.5
+              },
+              filter: ['in', '$type', 'LineString']
+          });
+         
+          map.addLayer({
+         'id': 'PlainBuildings',
+         'source':
+          {
+            'type': 'vector',
+            'url': 'mapbox://halamkh.ck02fkxi41c092jqeevhx863u-1aqxx'
+          },
+         'source-layer': 'basemapMonash', 
+         'type': 'fill',
+         'paint': 
+          {
+            'fill-color': '#6372e9'
+
+          },
+        });
+
+         //Insert Networkline
+         map.addLayer({
+              'id': 'Ring 3',
+              'source':
+                {
+                  'type': 'vector',
+                  'url': 'mapbox://halamkh.cjz7u1fhk0kd52io8lh2uaj1g-7bw9y'
+                },
+              'source-layer': 'NetworkLineV2', 
+              type: 'line', 
+              paint: {        
+               'line-color': "#a42d2d",
+               'line-width': 2
+             },
+              });//Insert Network layer (finish)
+
+
+          map.addLayer({
+           'id': 'Buildings',
+           'source':
+              {
+                'type': 'vector',
+                'url': 'mapbox://halamkh.ck0g40bkc07cl2os05gzabdgt-73cyp'
+              },
+           'source-layer': 'MonashBuildingsV9', 
+           'type': 'fill-extrusion',
+           'paint': 
+              {
+                //'fill-extrusion-color': '#6372e9',
+                'fill-extrusion-color':
+                {
+                  'type': 'identity',
+                  'property': 'capacity'
+                },
+                'fill-extrusion-height': 
+                {
+                  'type': 'identity',
+                  'property': 'height'
+                }
+                //'fill-extrusion-opacity': parseFloat('capacity')
+              }
+          });//Insert Buildings layer (finish)
+      
+
+          //  //Insert PVs layer (start)
+            map.addLayer({
+               'id': 'PVs and Batteries',
+               'source':
+                 {
+                   'type': 'vector',
+                   'url': 'mapbox://halamkh.cjz3peo0k01ym2imhybri2svq-3ml72'
+                 },
+               'source-layer': 'PVVattaryV3', 
+               'type': 'fill-extrusion',
+               'paint': 
+                 {
+                    'fill-extrusion-color': {
+                      'type':'identity',
+                      'property': 'color1'
+                    },
+                    'fill-extrusion-height': 
+                     {
+                       'type': 'identity',
+                       'property': 'height'
+                     },
+                     'fill-extrusion-base': 
+                     {
+                       'type': 'identity',
+                       'property': 'baseHeight'
+                     },
+                     'fill-extrusion-opacity': 0.8
+                }
+               });//Insert PVs layer (finish)
+
+
+
+            //Insert MainStation layer
+         map.addLayer({
+          'id': 'HV Switch',
+          'source':
+           {
+             'type': 'vector',
+             'url': 'mapbox://halamkh.cjz3egag301vh2nplbm8t71no-47pbb'
+           },
+          'source-layer': 'MainSubstationV2', 
+          'type': 'fill-extrusion',
+          'paint': 
+           {
+             'fill-extrusion-color': '#842424',
+            'fill-extrusion-height': 
+            {
+              'type': 'identity',
+              'property': 'height'
+            },
+
+           }
+
+      
+              });//Insert Mainstation layer (finish)
+
+
+
+          //Insert Substation layer
+          map.addLayer({
+              'id': 'Substations',
+              'source':
+                {
+                  'type': 'vector',
+                  'url': 'mapbox://halamkh.cjz3eh3zt04vg2orre6a7noab-5wozc'
+                },
+              'source-layer': 'SubstationsV2', 
+              type: 'circle',
+              paint: {
+              'circle-color':'#c82d2d'
+              },
+              });//Insert Substation layer (finish)
+
+    
+       });// main onmap for layers function
+
+
+
+///////////////////////////////////////////////////////////////////////////////
+
+
+      //Buttons code
+      var toggleableLayerIds = ['Buildings','PVs and Batteries','HV Switch','Ring 3','Substations' ];
+
+      for (var i = 0; i < toggleableLayerIds.length; i++) {
+          var id = toggleableLayerIds[i];
+
+          var link = document.createElement('a');
+          link.href = '#';
+          link.className = 'active mnu'+(id.split(' ').join(''));
+          link.textContent = id;
+
+          link.onclick = function (e) {
+              var clickedLayer = this.textContent;
+              e.preventDefault();
+              e.stopPropagation();
+
+              var visibility = map.getLayoutProperty(clickedLayer, 'visibility');
+
+              if (visibility === 'visible') {
+                  // we turn inactive
+                  map.setLayoutProperty(clickedLayer, 'visibility', 'none');
+                  this.className = 'active ' ;
+
+              } else {               
+                  // we turn active
+                  this.className = 'mnu'+clickedLayer.split(' ').join('') ;
+                  map.setLayoutProperty(clickedLayer, 'visibility', 'visible');
+              }
+          };//onclick function
+
+          var layers = document.getElementById('menu');
+          layers.appendChild(link);
+      }// For loop
+
+        var layers = document.getElementById('menu');
+        var link = document.createElement('a');
+        link.href = 'file:///C:/Users/Hala/Desktop/Monash/Final/TestasFinal/Theconsumption.html';
+        link.className = 'active consump';
+        link.textContent = 'Consumption';
+        layers.appendChild(link);
+
+
+
+      // insert something into imagemap
+      var link = document.createElement('a');
+      link.href = '#';
+      link.className = 'active';
+      link.textContent = 'hello';
+      var layers = document.getElementById('imagemap');
+      layers.appendChild(link);
+
+
+
+      // Create a popup, but don't add it to the map yet.
+      var popup = new mapboxgl.Popup({
+          closeButton: false,
+          closeOnClick: false
+      });
+
+      map.on('mouseenter', 'Buildings', function(e) {
+          // Change the cursor style as a UI indicator.
+          map.getCanvas().style.cursor = 'pointer';
+
+          var coordinates = e.features[0].geometry.coordinates.slice();
+          var p = e.features[0].properties;
+          //console.log(e.features[0] );
+          var description = 'BuildingName   : ' + p.BuildingName   + '<br>' + 
+                            'BuildingID     : ' + p.BuildingID     + '<br>' +
+                            'Height         : ' + p.Height         + '<br>' +
+                            'BuildingAddress: ' + p.BuildingAddress+ '<br>' +
+                            'SolarCapacity  : ' + p.SolarCapacity  + '<br>' +
+                            'Stories        : ' + p.Stories        + '<br>' +
+                            'image          : <img src="' + p.image          + '"><br>' +
+                            'image2         : ' + p.image          + '<br>'
+                              
+                            ;
+
+          // Ensure that if the map is zoomed out such that multiple
+          // copies of the feature are visible, the popup appears
+          // over the copy being pointed to.
+
+          // Populate the popup and set its coordinates
+          // based on the feature found.
+          popup .setLngLat(coordinates[0][0] )
+              .setHTML(description)
+              .addTo(map);
+              
+          var img = document.getElementById('imagemap');
+          var image = document.createElement('img');
+          image.scr = p.image;
+          //console.log(image);
+
+          
+          //image.appendChild(img);
+      });
+
+      map.on('mouseleave', 'Buildings', function() {
+          map.getCanvas().style.cursor = '';
+          popup.remove();
+      });
+      
+      var measureOn = document.getElementById('MeasureOn');
+      measureOn.addEventListener('click', function(e) {
+        MeasureOn = ! MeasureOn;
+        if (MeasureOn) {
+          savePitch = map.getPitch();
+          saveBearing = map.getBearing();
+          map.setPitch(0);
+          map.setBearing(0);
+          o = map.getStyle();
+          console.log(o)          
+          //o = map.getLayer('Buildings');
+          
+          visibilityBuilding = map.getLayoutProperty('Buildings', 'visibility');
+          visibilityPV = map.getLayoutProperty('PVs and Batteries', 'visibility');
+          
+          map.setLayoutProperty('Buildings', 'visibility', 'none');          
+          map.setLayoutProperty('PVs and Batteries', 'visibility', 'none');          
+          //           'source-layer': 'MonashBuildingsV9', 
+
+        } else {
+          map.setPitch(savePitch);
+          map.setBearing(saveBearing);
+          
+          // trying to remove the points
+          while (geojson.features.length > 0) geojson.features.pop();
+          map.getSource('geojson').setData( geojson );
+          map.setLayoutProperty('Buildings', 'visibility', visibilityBuilding);      
+          map.setLayoutProperty('PVs and Batteries', 'visibility', visibilityPV);
+        }
+      });
+
+      map.on('click', function(e) {
+          if (!MeasureOn) return;
+          
+          var features = map.queryRenderedFeatures(e.point, { layers: ['measure-points'] });
+
+          // Remove the linestring from the group
+          // So we can redraw it based on the points collection
+          if (geojson.features.length > 1) geojson.features.pop();
+
+          // Clear the Distance container to populate it with a new value
+          distanceContainer.innerHTML = '';
+
+          // If a feature was clicked, remove it from the map
+          if (features.length) {
+              var id = features[0].properties.id;
+              geojson.features = geojson.features.filter(function(point) {
+                  return point.properties.id !== id;
+              });
+          } else {
+              var point = {
+                  "type": "Feature",
+                  "geometry": {
+                      "type": "Point",
+                      "coordinates": [
+                          e.lngLat.lng,
+                          e.lngLat.lat
+                      ]
+                  },
+                  "properties": {
+                      "id": String(new Date().getTime())
+                  }
+              };
+
+              geojson.features.push(point);
+          }
+
+          if (geojson.features.length > 1) {
+              linestring.geometry.coordinates = geojson.features.map(function(point) {
+                  return point.geometry.coordinates;
+              });
+
+              geojson.features.push(linestring);
+
+              // Populate the distanceContainer with total distance
+              var value = document.createElement('pre');
+              value.textContent = 'Total distance: ' + turf.lineDistance(linestring).toLocaleString() + 'km';
+              distanceContainer.appendChild(value);
+          }
+
+          map.getSource('geojson').setData(geojson);
+      });
+
+
+      map.on('mousemove', function (e) {
+          var features = map.queryRenderedFeatures(e.point, { layers: ['measure-points'] });
+          // UI indicator for clicking/hovering a point on the map
+          if (MeasureOn)
+            map.getCanvas().style.cursor = (features.length) ? 'pointer' : 'crosshair';
+          else
+            map.getCanvas().style.cursor = 'pointer';
+      });
+      
+
+      
+           // Add zoom and rotation controls to the map.
+map.addControl(new mapboxgl.NavigationControl());
+}// else
+
+
+</script>
+
+</body>
+</html>
